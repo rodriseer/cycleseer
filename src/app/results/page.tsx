@@ -14,7 +14,7 @@ type Suggestion = {
 
 type ScoreResponse = {
   ok: true;
-  input: { startText: string; endText: string };
+  input: any;
   route: {
     distance_m: number;
     duration_s: number;
@@ -161,120 +161,109 @@ export default function ResultsPage() {
     );
   }, []);
 
-  // --- Autocomplete states ---
-  const [startText, setStartText] = useState("");
-  const [endText, setEndText] = useState("");
+  type StopState = {
+    id: number;
+    text: string;
+    query: string;
+    center: [number, number] | null;
+    suggestions: Suggestion[];
+    open: boolean;
+    activeIndex: number;
+  };
 
-  const [startQuery, setStartQuery] = useState("");
-  const [endQuery, setEndQuery] = useState("");
+  const [stops, setStops] = useState<StopState[]>([
+    { id: 1, text: "", query: "", center: null, suggestions: [], open: false, activeIndex: -1 },
+    { id: 2, text: "", query: "", center: null, suggestions: [], open: false, activeIndex: -1 },
+  ]);
 
-  const [startSuggestions, setStartSuggestions] = useState<Suggestion[]>([]);
-  const [endSuggestions, setEndSuggestions] = useState<Suggestion[]>([]);
-  const [startOpen, setStartOpen] = useState(false);
-  const [endOpen, setEndOpen] = useState(false);
+  const suggestAbortRef = useRef<Record<number, AbortController | null>>({});
+  const suggestDebounceRef = useRef<Record<number, number | null>>({});
 
-  const [startCenter, setStartCenter] = useState<[number, number] | null>(null);
-  const [endCenter, setEndCenter] = useState<[number, number] | null>(null);
-
-  const startAbortRef = useRef<AbortController | null>(null);
-  const endAbortRef = useRef<AbortController | null>(null);
-  const startDebounceRef = useRef<number | null>(null);
-  const endDebounceRef = useRef<number | null>(null);
-
-  const [startActive, setStartActive] = useState(-1);
-  const [endActive, setEndActive] = useState(-1);
-
-  function closeAll() {
-    setStartOpen(false);
-    setEndOpen(false);
-    setStartActive(-1);
-    setEndActive(-1);
+  function updateStop(index: number, patch: Partial<StopState>) {
+    setStops((prev) =>
+      prev.map((s, i) => (i === index ? { ...s, ...patch } : s))
+    );
   }
 
-  async function fetchSuggest(q: string, which: "start" | "end") {
-    const controller = new AbortController();
-    const abortRef = which === "start" ? startAbortRef : endAbortRef;
+  function closeAll() {
+    setStops((prev) =>
+      prev.map((s) => ({ ...s, open: false, activeIndex: -1 }))
+    );
+  }
 
-    abortRef.current?.abort();
-    abortRef.current = controller;
+  async function fetchSuggestFor(index: number, q: string) {
+    const controller = new AbortController();
+    const store = suggestAbortRef.current;
+    store[index]?.abort();
+    store[index] = controller;
 
     const url = new URL("/api/suggest", window.location.origin);
     url.searchParams.set("q", q);
     if (proximity) url.searchParams.set("proximity", proximity);
 
-    const j = await callApiJson<{ ok: true; suggestions: Suggestion[] }>(url.toString(), {
-      signal: controller.signal,
-    });
+    const j = await callApiJson<{ ok: true; suggestions: Suggestion[] }>(
+      url.toString(),
+      { signal: controller.signal }
+    );
 
     const list = (j.suggestions ?? []) as Suggestion[];
-    if (which === "start") setStartSuggestions(list);
-    else setEndSuggestions(list);
+    updateStop(index, { suggestions: list });
   }
 
-  function onChangeStart(v: string) {
-    setStartText(v);
-    setStartQuery(v);
-    setStartCenter(null);
+  function onChangeStop(index: number, v: string) {
+    updateStop(index, {
+      text: v,
+      query: v,
+      center: null,
+      suggestions: [],
+    });
     setErr(null);
     setData(null);
     setWind(null);
     setHoverDistM(null);
 
-    if (startDebounceRef.current) window.clearTimeout(startDebounceRef.current);
+    const debounces = suggestDebounceRef.current;
+    if (debounces[index]) window.clearTimeout(debounces[index]!);
 
     const q = v.trim();
     if (q.length < 2) {
-      setStartSuggestions([]);
-      setStartOpen(false);
-      setStartActive(-1);
+      updateStop(index, { open: false, activeIndex: -1, suggestions: [] });
       return;
     }
 
-    setStartOpen(true);
-    setStartActive(-1);
-    startDebounceRef.current = window.setTimeout(() => {
-      fetchSuggest(q, "start").catch(() => {});
-    }, 160);
+    updateStop(index, { open: true, activeIndex: -1 });
+    debounces[index] = window.setTimeout(() => {
+      fetchSuggestFor(index, q).catch(() => {});
+    }, 300);
   }
 
-  function onChangeEnd(v: string) {
-    setEndText(v);
-    setEndQuery(v);
-    setEndCenter(null);
-    setErr(null);
-    setData(null);
-    setWind(null);
-    setHoverDistM(null);
-
-    if (endDebounceRef.current) window.clearTimeout(endDebounceRef.current);
-
-    const q = v.trim();
-    if (q.length < 2) {
-      setEndSuggestions([]);
-      setEndOpen(false);
-      setEndActive(-1);
-      return;
-    }
-
-    setEndOpen(true);
-    setEndActive(-1);
-    endDebounceRef.current = window.setTimeout(() => {
-      fetchSuggest(q, "end").catch(() => {});
-    }, 160);
+  function pickStop(index: number, s: Suggestion) {
+    updateStop(index, {
+      text: s.place_name,
+      query: s.place_name,
+      center: s.center ?? null,
+      open: false,
+      activeIndex: -1,
+    });
   }
 
-  function pickStart(s: Suggestion) {
-    setStartText(s.place_name);
-    setStartCenter(s.center ?? null);
-    setStartOpen(false);
-    setStartActive(-1);
+  function addStop() {
+    setStops((prev) => {
+      if (prev.length >= 5) return prev;
+      const nextId = prev[prev.length - 1]?.id + 1 || 1;
+      return [
+        ...prev.slice(0, prev.length - 1),
+        { id: nextId, text: "", query: "", center: null, suggestions: [], open: false, activeIndex: -1 },
+        prev[prev.length - 1],
+      ];
+    });
   }
 
-  function pickEnd(s: Suggestion) {
-    setEndText(s.place_name);
-    setEndCenter(s.center ?? null);
-    setEndOpen(false);
-    setEndActive(-1);
+  function removeStop(index: number) {
+    setStops((prev) => {
+      if (prev.length <= 2) return prev;
+      return prev.filter((_, i) => i !== index);
+    });
   }
 
   async function useMyLocation() {
@@ -293,7 +282,13 @@ export default function ResultsPage() {
         const lng = pos.coords.longitude;
         const lat = pos.coords.latitude;
 
-        setStartCenter([lng, lat]);
+        setStops((prev) => {
+          const next = [...prev];
+          if (next[0]) {
+            next[0] = { ...next[0], center: [lng, lat] as [number, number] };
+          }
+          return next;
+        });
 
         try {
           const url = new URL("/api/reverse", window.location.origin);
@@ -304,11 +299,22 @@ export default function ResultsPage() {
           const j = await r.json();
           if (!r.ok || !j?.ok) throw new Error(j?.error ?? "Reverse geocode failed");
 
-          setStartText(String(j.place_name ?? "Current location"));
-          setStartQuery(String(j.place_name ?? "Current location"));
+          const label = String(j.place_name ?? "Current location");
+          setStops((prev) => {
+            const next = [...prev];
+            if (next[0]) {
+              next[0] = { ...next[0], text: label, query: label };
+            }
+            return next;
+          });
         } catch {
-          setStartText("Current location");
-          setStartQuery("Current location");
+          setStops((prev) => {
+            const next = [...prev];
+            if (next[0]) {
+              next[0] = { ...next[0], text: "Current location", query: "Current location" };
+            }
+            return next;
+          });
         }
       },
       (error) => {
@@ -332,20 +338,35 @@ export default function ResultsPage() {
     setWind(null);
     setHoverDistM(null);
 
-    const s = startText.trim();
-    const e = endText.trim();
-
-    if (!s || !e) {
-      setErr("Start and destination are required.");
+    const trimmed = stops.map((s) => ({ ...s, text: s.text.trim() }));
+    let lastIdx = -1;
+    for (let i = 0; i < trimmed.length; i++) {
+      if (trimmed[i].text) lastIdx = i;
+    }
+    if (lastIdx < 1) {
+      setErr("At least a start and a destination are required.");
       return;
     }
+    for (let i = 0; i <= lastIdx; i++) {
+      if (!trimmed[i].text) {
+        setErr("Fill all stops up to the destination or remove unused ones.");
+        return;
+      }
+    }
+
+    const activeStops = trimmed.slice(0, lastIdx + 1);
 
     setLoading(true);
     try {
       const j = await callApiJson<ScoreResponse>("/api/score-route", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ startText: s, endText: e, startCenter, endCenter }),
+        body: JSON.stringify({
+          places: activeStops.map((s) => ({
+            text: s.text,
+            center: s.center,
+          })),
+        }),
       });
 
       setData(j);
@@ -454,52 +475,106 @@ export default function ResultsPage() {
             </button>
           </div>
 
-          <div className="mt-6 grid grid-cols-1 md:grid-cols-2 gap-4">
-            <AutoField
-              label="Start"
-              placeholder="e.g., Rock Creek Park"
-              value={startText}
-              query={startQuery}
-              open={startOpen}
-              suggestions={startSuggestions}
-              activeIndex={startActive}
-              onActiveIndex={setStartActive}
-              onChange={onChangeStart}
-              onPick={pickStart}
-              onFocus={() => startText.trim().length >= 2 && setStartOpen(true)}
-              onKeyDown={(key) => {
-                if (!startOpen) return;
-                if (key === "Escape") setStartOpen(false);
-                if (key === "ArrowDown") setStartActive((i) => clamp(i + 1, 0, Math.max(0, startSuggestions.length - 1)));
-                if (key === "ArrowUp") setStartActive((i) => clamp(i - 1, 0, Math.max(0, startSuggestions.length - 1)));
-                if (key === "Enter") {
-                  if (startActive >= 0 && startSuggestions[startActive]) pickStart(startSuggestions[startActive]);
-                }
-              }}
-            />
+          <div className="mt-6 space-y-4">
+            {stops.map((s, index) => {
+              const isFirst = index === 0;
+              const isLast = index === stops.length - 1;
+              const label = isFirst
+                ? "Start"
+                : isLast
+                  ? "Destination"
+                  : `Stop ${index + 1}`;
+              const placeholder = isFirst
+                ? "e.g., Home or trailhead"
+                : isLast
+                  ? "e.g., Final destination"
+                  : "e.g., Midpoint café or lookout";
 
-            <AutoField
-              label="Destination"
-              placeholder="e.g., National Mall"
-              value={endText}
-              query={endQuery}
-              open={endOpen}
-              suggestions={endSuggestions}
-              activeIndex={endActive}
-              onActiveIndex={setEndActive}
-              onChange={onChangeEnd}
-              onPick={pickEnd}
-              onFocus={() => endText.trim().length >= 2 && setEndOpen(true)}
-              onKeyDown={(key) => {
-                if (!endOpen) return;
-                if (key === "Escape") setEndOpen(false);
-                if (key === "ArrowDown") setEndActive((i) => clamp(i + 1, 0, Math.max(0, endSuggestions.length - 1)));
-                if (key === "ArrowUp") setEndActive((i) => clamp(i - 1, 0, Math.max(0, endSuggestions.length - 1)));
-                if (key === "Enter") {
-                  if (endActive >= 0 && endSuggestions[endActive]) pickEnd(endSuggestions[endActive]);
-                }
-              }}
-            />
+              return (
+                <div key={s.id} className="flex gap-2 items-start">
+                  <div className="flex-1">
+                    <AutoField
+                      label={label}
+                      placeholder={placeholder}
+                      value={s.text}
+                      query={s.query}
+                      open={s.open}
+                      suggestions={s.suggestions}
+                      activeIndex={s.activeIndex}
+                      onActiveIndex={(fnOrIdx) =>
+                        updateStop(
+                          index,
+                          typeof fnOrIdx === "function"
+                            ? {
+                                activeIndex: fnOrIdx(s.activeIndex),
+                              }
+                            : { activeIndex: fnOrIdx }
+                        )
+                      }
+                      onChange={(v) => onChangeStop(index, v)}
+                      onPick={(suggestion) => pickStop(index, suggestion)}
+                      onFocus={() =>
+                        s.text.trim().length >= 2 &&
+                        updateStop(index, { open: true })
+                      }
+                      onKeyDown={(key) => {
+                        if (!s.open) return;
+                        if (key === "Escape") {
+                          updateStop(index, { open: false });
+                        }
+                        if (key === "ArrowDown") {
+                          updateStop(index, {
+                            activeIndex: clamp(
+                              s.activeIndex + 1,
+                              0,
+                              Math.max(0, s.suggestions.length - 1)
+                            ),
+                          });
+                        }
+                        if (key === "ArrowUp") {
+                          updateStop(index, {
+                            activeIndex: clamp(
+                              s.activeIndex - 1,
+                              0,
+                              Math.max(0, s.suggestions.length - 1)
+                            ),
+                          });
+                        }
+                        if (key === "Enter") {
+                          if (
+                            s.activeIndex >= 0 &&
+                            s.suggestions[s.activeIndex]
+                          ) {
+                            pickStop(index, s.suggestions[s.activeIndex]);
+                          }
+                        }
+                      }}
+                    />
+                  </div>
+                  {!isFirst && !isLast && (
+                    <button
+                      type="button"
+                      onClick={() => removeStop(index)}
+                      className="mt-7 text-xs text-white/50 hover:text-white/80 px-2"
+                      title="Remove stop"
+                    >
+                      ✕
+                    </button>
+                  )}
+                </div>
+              );
+            })}
+
+            {stops.length < 5 && (
+              <button
+                type="button"
+                onClick={addStop}
+                className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/5 px-4 py-2 text-xs text-white/80 hover:bg-white/10 transition-all duration-200 hover:scale-[1.02] active:scale-[0.98]"
+              >
+                <span className="text-lg leading-none">+</span>
+                Add stop (up to 5)
+              </button>
+            )}
           </div>
 
           <button

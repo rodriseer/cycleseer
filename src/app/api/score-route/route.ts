@@ -3,11 +3,17 @@ import { NextResponse } from "next/server";
 import { scoreRoute } from "@/lib/routeScoring";
 import { routeCache } from "@/lib/cache";
 
+type PlaceBody = {
+  text?: string;
+  center?: [number, number] | null;
+};
+
 type Body = {
   startText?: string;
   endText?: string;
   startCenter?: [number, number] | null; // [lng, lat]
   endCenter?: [number, number] | null;
+  places?: PlaceBody[];
 };
 
 export async function POST(req: Request) {
@@ -19,16 +25,101 @@ export async function POST(req: Request) {
 
     const body = (await req.json()) as Body;
 
+    // New multi-stop flow: body.places
+    if (Array.isArray(body.places) && body.places.length >= 2) {
+      if (body.places.length > 5) {
+        return NextResponse.json(
+          { ok: false, error: "A maximum of 5 stops is supported." },
+          { status: 400 }
+        );
+      }
+
+      const trimmed = body.places.map((p) => ({
+        text: (p.text ?? "").trim(),
+        center:
+          Array.isArray(p.center) && p.center.length === 2 ? p.center : null,
+      }));
+
+      let lastIdx = -1;
+      for (let i = 0; i < trimmed.length; i++) {
+        if (trimmed[i].text) lastIdx = i;
+      }
+
+      if (lastIdx < 1) {
+        return NextResponse.json(
+          { ok: false, error: "At least a start and a destination are required." },
+          { status: 400 }
+        );
+      }
+
+      for (let i = 0; i <= lastIdx; i++) {
+        if (!trimmed[i].text) {
+          return NextResponse.json(
+            {
+              ok: false,
+              error: "Fill all stops up to the destination or remove unused ones.",
+            },
+            { status: 400 }
+          );
+        }
+      }
+
+      const active = trimmed.slice(0, lastIdx + 1);
+
+      const resolved = await Promise.all(
+        active.map(async (p) => {
+          if (p.center) {
+            return { place_name: p.text, center: p.center as [number, number] };
+          }
+          return forwardGeocode(p.text, token);
+        })
+      );
+
+      const centers = resolved.map((r) => r.center);
+      const route = await cyclingDirectionsMulti(centers, token);
+      const elevation = await elevationFromTerrainRGB(
+        route.geometry.coordinates,
+        token
+      );
+      const score = scoreRoute(
+        route.distance_m,
+        route.duration_s,
+        elevation.gain_m
+      );
+
+      return NextResponse.json({
+        ok: true,
+        input: {
+          places: active.map((p, i) => ({
+            text: p.text,
+            center: resolved[i].center,
+          })),
+        },
+        route,
+        elevation,
+        score,
+      });
+    }
+
+    // Legacy A → B flow
     const startText = (body.startText ?? "").trim();
     const endText = (body.endText ?? "").trim();
 
     if (!startText || !endText) {
-      return NextResponse.json({ ok: false, error: "startText and endText are required" }, { status: 400 });
+      return NextResponse.json(
+        { ok: false, error: "startText and endText are required" },
+        { status: 400 }
+      );
     }
 
     const startCenter =
-      Array.isArray(body.startCenter) && body.startCenter.length === 2 ? body.startCenter : null;
-    const endCenter = Array.isArray(body.endCenter) && body.endCenter.length === 2 ? body.endCenter : null;
+      Array.isArray(body.startCenter) && body.startCenter.length === 2
+        ? body.startCenter
+        : null;
+    const endCenter =
+      Array.isArray(body.endCenter) && body.endCenter.length === 2
+        ? body.endCenter
+        : null;
 
     const start = startCenter
       ? { place_name: startText, center: startCenter }
@@ -49,15 +140,13 @@ export async function POST(req: Request) {
       elevation.gain_m
     );
 
-    return NextResponse.json(
-      {
-        ok: true,
-        input: { startText, endText },
-        route,
-        elevation,
-        score,
-      }
-    );
+    return NextResponse.json({
+      ok: true,
+      input: { startText, endText },
+      route,
+      elevation,
+      score,
+    });
   } catch (e: any) {
     return NextResponse.json({ ok: false, error: e?.message ?? "Server error" }, { status: 500 });
   }
@@ -127,6 +216,46 @@ async function cyclingDirections(
   const url =
     `https://api.mapbox.com/directions/v5/mapbox/cycling/${coords}` +
     `?geometries=geojson&overview=full&access_token=${encodeURIComponent(token)}`;
+
+  const r = await fetch(url, { cache: "no-store" });
+  if (!r.ok) throw new Error(`Directions failed (${r.status})`);
+  const j = await r.json();
+
+  const rt = j?.routes?.[0];
+  if (!rt?.geometry?.coordinates?.length) throw new Error("No route returned");
+
+  const bbox = computeBbox(rt.geometry.coordinates);
+
+  return {
+    distance_m: rt.distance,
+    duration_s: rt.duration,
+    bbox,
+    geometry: rt.geometry,
+  };
+}
+
+async function cyclingDirectionsMulti(
+  points: [number, number][],
+  token: string
+): Promise<{
+  distance_m: number;
+  duration_s: number;
+  bbox: [number, number, number, number];
+  geometry: { type: "LineString"; coordinates: [number, number][] };
+}> {
+  if (points.length < 2) {
+    throw new Error("At least two points are required for a route.");
+  }
+
+  const coords = points
+    .map(([lng, lat]) => `${lng},${lat}`)
+    .join(";");
+
+  const url =
+    `https://api.mapbox.com/directions/v5/mapbox/cycling/${coords}` +
+    `?geometries=geojson&overview=full&access_token=${encodeURIComponent(
+      token
+    )}`;
 
   const r = await fetch(url, { cache: "no-store" });
   if (!r.ok) throw new Error(`Directions failed (${r.status})`);

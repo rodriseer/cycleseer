@@ -458,8 +458,8 @@ export default function ResultsPage() {
       </div>
 
       <div className="mt-10 grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Inputs */}
-        <div className="lg:col-span-2 rounded-2xl border border-white/10 bg-white/5 p-6">
+        {/* Inputs + map column */}
+        <div className="order-1 lg:order-1 lg:col-span-2 rounded-2xl border border-white/10 bg-white/5 p-6">
           <div className="flex items-center justify-between gap-4">
             <h2 className="text-lg font-semibold tracking-tight">Route inputs</h2>
             <button
@@ -713,104 +713,106 @@ export default function ResultsPage() {
           )}
         </div>
 
-        {/* Score Card */}
-        {loading && !data ? (
-          <ScoreSkeleton />
-        ) : (
-        <div className="rounded-2xl border border-white/10 bg-white/5 p-6">
-          <div className="flex items-center justify-between">
-            <h2 className="text-lg font-semibold tracking-tight">Ride score</h2>
-            <span className="text-xs text-white/60">{data ? "Computed" : "Waiting"}</span>
-          </div>
-
-          {/* Wind badge (added) */}
-          {data && wind && (
-            <div className="mt-4 rounded-2xl border border-white/10 bg-zinc-950/30 px-4 py-3 text-sm text-white/80">
+        {/* Score Card column */}
+        <div className="order-2 lg:order-2">
+          {loading && !data ? (
+            <ScoreSkeleton />
+          ) : (
+            <div className="rounded-2xl border border-white/10 bg-white/5 p-6">
               <div className="flex items-center justify-between">
-                <div className="text-xs text-white/60">Wind</div>
-                <div className="text-xs text-white/60">{wind.type}</div>
+                <h2 className="text-lg font-semibold tracking-tight">Ride score</h2>
+                <span className="text-xs text-white/60">{data ? "Computed" : "Waiting"}</span>
               </div>
-              <div className="mt-1 flex items-center justify-between">
-                <div>
-                  <span className="font-medium text-white">{wind.wind_mph.toFixed(0)} mph</span>{" "}
-                  <span className="text-white/60">at 10m</span>
+
+              {/* Wind badge (added) */}
+              {data && wind && (
+                <div className="mt-4 rounded-2xl border border-white/10 bg-zinc-950/30 px-4 py-3 text-sm text-white/80">
+                  <div className="flex items-center justify-between">
+                    <div className="text-xs text-white/60">Wind</div>
+                    <div className="text-xs text-white/60">{wind.type}</div>
+                  </div>
+                  <div className="mt-1 flex items-center justify-between">
+                    <div>
+                      <span className="font-medium text-white">{wind.wind_mph.toFixed(0)} mph</span>{" "}
+                      <span className="text-white/60">at 10m</span>
+                    </div>
+                    <div className="text-white/70">
+                      Impact:{" "}
+                      <span className={wind.penalty < 0 ? "text-rose-200" : "text-emerald-200"}>
+                        {wind.penalty < 0 ? `${wind.penalty.toFixed(1)}` : `+${wind.penalty.toFixed(1)}`}
+                      </span>
+                    </div>
+                  </div>
                 </div>
-                <div className="text-white/70">
-                  Impact:{" "}
-                  <span className={wind.penalty < 0 ? "text-rose-200" : "text-emerald-200"}>
-                    {wind.penalty < 0 ? `${wind.penalty.toFixed(1)}` : `+${wind.penalty.toFixed(1)}`}
-                  </span>
+              )}
+
+              {/* Main score */}
+              <div className="mt-6 relative rounded-2xl border border-white/10 bg-gradient-to-br from-white/10 to-white/5 p-6 overflow-hidden">
+                <div className="absolute inset-0 bg-[radial-gradient(circle_at_top,rgba(251,191,36,0.25),transparent_60%)]" />
+                <div className="relative">
+                  <div className="text-sm text-white/60">Overall ride feel</div>
+
+                  <div className={`mt-2 text-6xl font-semibold tracking-tight ${scoreColor}`}>
+                    {data ? displayedScore.toFixed(1) : "—"}{" "}
+                    <span className="text-base text-white/50">/10</span>
+                  </div>
+
+                  <div className="mt-2 text-xs text-white/55">
+                    {data && wind ? (
+                      <>
+                        Base: {data.score.total.toFixed(1)} • Wind:{" "}
+                        {wind.penalty < 0 ? `${wind.penalty.toFixed(1)}` : `+${wind.penalty.toFixed(1)}`}
+                      </>
+                    ) : (
+                      "Includes distance, climbing, comfort… and wind when available."
+                    )}
+                  </div>
+
+                  <div className="mt-3 text-sm text-white/70">
+                    {data ? humanSummaryScore(displayedScore) : "Run a score to see an explanation and ride tips."}
+                  </div>
+
+                  {data && (
+                    <div className="mt-4 flex flex-wrap gap-2">
+                      <Pill label="Ride type" value={rideLabel(data)} />
+                      <Pill label="Best for" value={rideTypeTag(data)} />
+                      <Pill label="Recommendation" value={rideRecommendation(data)} />
+                    </div>
+                  )}
                 </div>
               </div>
-            </div>
-          )}
 
-          {/* Main score */}
-          <div className="mt-6 relative rounded-2xl border border-white/10 bg-gradient-to-br from-white/10 to-white/5 p-6 overflow-hidden">
-            <div className="absolute inset-0 bg-[radial-gradient(circle_at_top,rgba(251,191,36,0.25),transparent_60%)]" />
-            <div className="relative">
-              <div className="text-sm text-white/60">Overall ride feel</div>
-
-              <div className={`mt-2 text-6xl font-semibold tracking-tight ${scoreColor}`}>
-                {data ? displayedScore.toFixed(1) : "—"}{" "}
-                <span className="text-base text-white/50">/10</span>
+              {/* Plain-English breakdown */}
+              <div className="mt-6 space-y-3">
+                <ExplainRow label="Speed feel" value={data ? to10(data.score.factors.efficiency) : null} hint={data ? speedHint(data) : "—"} />
+                <ExplainRow label="Climb effort" value={data ? to10(data.score.factors.climbing) : null} hint={data ? climbHint(data) : "—"} />
+                <ExplainRow label="Comfort" value={data ? to10(data.score.factors.safety_proxy) : null} hint={data ? comfortHint(data) : "—"} />
               </div>
 
-              <div className="mt-2 text-xs text-white/55">
-                {data && wind ? (
-                  <>
-                    Base: {data.score.total.toFixed(1)} • Wind:{" "}
-                    {wind.penalty < 0 ? `${wind.penalty.toFixed(1)}` : `+${wind.penalty.toFixed(1)}`}
-                  </>
+              {/* Why section (kept) */}
+              <div className="mt-6 rounded-2xl border border-white/10 bg-zinc-950/30 p-4">
+                <div className="text-xs text-white/60">Why this score</div>
+
+                {data ? (
+                  <ul className="mt-2 space-y-2 text-sm text-white/75">
+                    {whyBullets(data, wind).map((b, i) => (
+                      <li key={i} className="flex gap-2">
+                        <span className="mt-[6px] h-1.5 w-1.5 rounded-full bg-amber-300/90 shrink-0" />
+                        <span>{b}</span>
+                      </li>
+                    ))}
+                  </ul>
                 ) : (
-                  "Includes distance, climbing, comfort… and wind when available."
+                  <div className="mt-2 text-sm text-white/70">We’ll explain the result here after scoring.</div>
                 )}
               </div>
 
-              <div className="mt-3 text-sm text-white/70">
-                {data ? humanSummaryScore(displayedScore) : "Run a score to see an explanation and ride tips."}
+              <div className="mt-4 text-xs text-white/50">
+                Coming next: bike-friendliness (protected lanes, road type) to improve accuracy.
               </div>
-
-              {data && (
-                <div className="mt-4 flex flex-wrap gap-2">
-                  <Pill label="Ride type" value={rideLabel(data)} />
-                  <Pill label="Best for" value={rideTypeTag(data)} />
-                  <Pill label="Recommendation" value={rideRecommendation(data)} />
-                </div>
-              )}
             </div>
-          </div>
-
-          {/* Plain-English breakdown */}
-          <div className="mt-6 space-y-3">
-            <ExplainRow label="Speed feel" value={data ? to10(data.score.factors.efficiency) : null} hint={data ? speedHint(data) : "—"} />
-            <ExplainRow label="Climb effort" value={data ? to10(data.score.factors.climbing) : null} hint={data ? climbHint(data) : "—"} />
-            <ExplainRow label="Comfort" value={data ? to10(data.score.factors.safety_proxy) : null} hint={data ? comfortHint(data) : "—"} />
-          </div>
-
-          {/* Why section (kept) */}
-          <div className="mt-6 rounded-2xl border border-white/10 bg-zinc-950/30 p-4">
-            <div className="text-xs text-white/60">Why this score</div>
-
-            {data ? (
-              <ul className="mt-2 space-y-2 text-sm text-white/75">
-                {whyBullets(data, wind).map((b, i) => (
-                  <li key={i} className="flex gap-2">
-                    <span className="mt-[6px] h-1.5 w-1.5 rounded-full bg-amber-300/90 shrink-0" />
-                    <span>{b}</span>
-                  </li>
-                ))}
-              </ul>
-            ) : (
-              <div className="mt-2 text-sm text-white/70">We’ll explain the result here after scoring.</div>
-            )}
-          </div>
-
-          <div className="mt-4 text-xs text-white/50">
-            Coming next: bike-friendliness (protected lanes, road type) to improve accuracy.
-          </div>
+          )}
         </div>
-        )}
       </div>
     </div>
   );

@@ -13,6 +13,7 @@
     "isolatedModules": true,
     "jsx": "react-jsx",
     "incremental": true,
+    "types": ["node", "next", "next/image-types/global"],
     "plugins": [
       {
         "name": "next"

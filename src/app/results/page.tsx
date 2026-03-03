@@ -1,12 +1,13 @@
 "use client";
 
 import Link from "next/link";
-import { Suspense, useEffect, useMemo, useRef, useState } from "react";
-import { useSearchParams } from "next/navigation";
+import { Suspense, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import RouteMap from "@/components/RouteMap";
 import ElevationChart from "@/components/ElevationChart";
 import { analyzeElevationSegments, ElevPoint } from "@/lib/elevationScoring";
 import { scoreRoute, type RideMode, RIDE_MODES } from "@/lib/routeScoring";
+import { formatDistance, metersToMiles, type Units } from "@/lib/units";
 
 type Suggestion = {
   id: string;
@@ -79,10 +80,6 @@ async function callApiJson<T>(input: RequestInfo, init?: RequestInit): Promise<T
   }
 
   return json as T;
-}
-
-function metersToMiles(m: number) {
-  return m / 1609.344;
 }
 
 function secondsToMin(s: number) {
@@ -172,12 +169,19 @@ function useAnimatedScore(target: number, durationMs = 600) {
 
 function ResultsPageContent() {
   const searchParams = useSearchParams();
+  const router = useRouter();
+  const pathname = usePathname();
 
   const [loading, setLoading] = useState(false);
   const [data, setData] = useState<ScoreResponse | null>(null);
   const [err, setErr] = useState<string | null>(null);
 
   const [hoverDistM, setHoverDistM] = useState<number | null>(null);
+
+  const [units, setUnits] = useState<Units>(() => {
+    const fromParam = (searchParams.get("units") as Units | null) ?? "mi";
+    return fromParam === "km" ? "km" : "mi";
+  });
 
   const [rideMode, setRideMode] = useState<RideMode>(() => {
     const initial = (searchParams.get("mode") as RideMode | null) ?? "scenic";
@@ -212,6 +216,8 @@ function ResultsPageContent() {
     } | null;
     fallbackMessage: string | null;
   }>(null);
+
+  const [shareStatus, setShareStatus] = useState<null | "copied" | "shared" | "error">(null);
 
   const routeOptions = useMemo<RouteOption[]>(() => {
     if (!data) return [];
@@ -522,6 +528,14 @@ function ResultsPageContent() {
 
     const activeStops = trimmed.slice(0, lastIdx + 1);
 
+    // Edge case: same start and destination
+    const firstText = activeStops[0]?.text.toLowerCase();
+    const lastText = activeStops[activeStops.length - 1]?.text.toLowerCase();
+    if (firstText && lastText && firstText === lastText) {
+      setErr("Start and destination are the same. Choose a different end point for a meaningful score.");
+      return;
+    }
+
     setLoading(true);
     try {
       const j = await callApiJson<ScoreResponse>("/api/score-route", {
@@ -538,8 +552,33 @@ function ResultsPageContent() {
 
       setData(j);
       closeAll();
+
+      // Keep URL shareable with latest start/end/units
+      try {
+        const first = activeStops[0]?.text ?? "";
+        const last = activeStops[activeStops.length - 1]?.text ?? "";
+        const params = new URLSearchParams(searchParams.toString());
+        if (first) params.set("start", first);
+        if (last) params.set("end", last);
+        params.set("units", units);
+        const qs = params.toString();
+        router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
+      } catch {
+        // ignore URL sync errors
+      }
     } catch (e: any) {
-      setErr(e?.message ?? "Something went wrong");
+      const raw = String(e?.message ?? "");
+      if (/startText and endText are required/i.test(raw)) {
+        setErr("Start and destination are required.");
+      } else if (/No geocoding result/i.test(raw)) {
+        setErr("We couldn’t locate one of those places. Try a nearby landmark or address.");
+      } else if (/Directions failed/i.test(raw) || /No route returned/i.test(raw)) {
+        setErr("We couldn’t find a ride between those points. Try adjusting your start or destination.");
+      } else if (/Elevation/i.test(raw)) {
+        setErr("Elevation data was unavailable. Please try again in a moment.");
+      } else {
+        setErr("We couldn’t score this route. Please try again in a moment.");
+      }
     } finally {
       setLoading(false);
     }
@@ -642,6 +681,21 @@ function ResultsPageContent() {
 
   const animatedScore = useAnimatedScore(displayedScore, 600);
 
+  const edgeNote = useMemo(() => {
+    if (!activeData) return null;
+    const miles = metersToMiles(activeData.route.distance_m);
+    if (miles < 0.3) {
+      return "This route is very short. Treat the score as a light signal, not a full evaluation.";
+    }
+    if (miles > 140) {
+      return "This is a long-day ride. Use the score as guidance and plan fueling and pacing carefully.";
+    }
+    if (!activeData.elevation?.samples) {
+      return "Elevation data was limited. The score leans more on distance and duration here.";
+    }
+    return null;
+  }, [activeData]);
+
   return (
     <div className="mx-auto max-w-7xl px-5 py-10 animate-[fadeIn_0.6s_ease-out]">
       <div className="flex items-start justify-between gap-6">
@@ -651,12 +705,61 @@ function ResultsPageContent() {
             Autocomplete + scoring + elevation + map. This is the heart of CycleSeer.
           </p>
         </div>
-        <Link
-          href="/"
-          className="rounded-full border border-white/15 bg-white/5 px-5 py-2.5 text-sm hover:bg-white/10 transition-all duration-[120ms] ease-[cubic-bezier(0.4,0,0.2,1)] hover:-translate-y-0.5 active:translate-y-0"
-        >
-          Back
-        </Link>
+        <div className="flex flex-col items-end gap-2">
+          <Link
+            href="/"
+            className="rounded-full border border-white/15 bg-white/5 px-5 py-2.5 text-sm hover:bg-white/10 transition-all duration-[120ms] ease-[cubic-bezier(0.4,0,0.2,1)] hover:-translate-y-0.5 active:translate-y-0"
+          >
+            Back
+          </Link>
+          <div className="flex items-center gap-2 text-[11px] text-white/60">
+            <span>Units</span>
+            <div className="inline-flex rounded-full border border-white/15 bg-white/5 p-0.5">
+              <button
+                type="button"
+                onClick={() => {
+                  if (units !== "mi") {
+                    setUnits("mi");
+                    if (typeof window !== "undefined") {
+                      window.localStorage.setItem("cycleseer:units", "mi");
+                    }
+                    const params = new URLSearchParams(searchParams.toString());
+                    params.set("units", "mi");
+                    const qs = params.toString();
+                    router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
+                  }
+                }}
+                className={[
+                  "px-2.5 py-1 rounded-full",
+                  units === "mi" ? "bg-white text-zinc-950 text-xs font-semibold" : "text-[11px] text-white/70",
+                ].join(" ")}
+              >
+                Miles
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (units !== "km") {
+                    setUnits("km");
+                    if (typeof window !== "undefined") {
+                      window.localStorage.setItem("cycleseer:units", "km");
+                    }
+                    const params = new URLSearchParams(searchParams.toString());
+                    params.set("units", "km");
+                    const qs = params.toString();
+                    router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
+                  }
+                }}
+                className={[
+                  "px-2.5 py-1 rounded-full",
+                  units === "km" ? "bg-white text-zinc-950 text-xs font-semibold" : "text-[11px] text-white/70",
+                ].join(" ")}
+              >
+                Kilometers
+              </button>
+            </div>
+          </div>
+        </div>
       </div>
 
       <div className="mt-10 grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -813,7 +916,7 @@ function ResultsPageContent() {
           <button
             onClick={onScore}
             disabled={loading}
-            className="mt-6 w-full rounded-full bg-amber-400 text-zinc-950 px-6 py-3.5 font-medium hover:bg-amber-300 disabled:opacity-60 disabled:cursor-not-allowed transition-all duration-[120ms] ease-[cubic-bezier(0.4,0,0.2,1)] hover:-translate-y-0.5 hover:shadow-lg active:translate-y-0"
+            className="mt-6 w-full rounded-full bg-[#f5b54a] text-zinc-950 px-6 py-3.5 text-sm font-medium hover:bg-[#f7c060] disabled:opacity-60 disabled:cursor-not-allowed transition-all duration-[160ms] ease-[cubic-bezier(0.4,0,0.2,1)] hover:-translate-y-0.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#f5b54a]/60"
           >
             {loading ? "Scoring..." : "Score route"}
           </button>
@@ -847,7 +950,7 @@ function ResultsPageContent() {
 
           {activeData && (
             <div className="mt-4 grid grid-cols-2 gap-3 md:grid-cols-4 md:gap-4">
-              <MiniStat label="Distance" value={`${distanceMiles.toFixed(1)} mi`} />
+              <MiniStat label="Distance" value={formatDistance(activeData.route.distance_m, units)} />
               <MiniStat label="ETA" value={`${secondsToMin(activeData.route.duration_s)} min`} />
               <MiniStat label="Gain" value={`${Math.round(activeData.elevation.gain_m)} m`} />
               <MiniStat label="Grade proxy" value={`${grade.toFixed(1)}%`} />
@@ -991,25 +1094,74 @@ function ResultsPageContent() {
 
               {/* Ride Score card — only when API has returned a valid result */}
               <div className="rounded-2xl border border-white/10 bg-white/5 p-4 md:p-6">
-                <div className="flex items-center justify-between">
+                <div className="flex items-center justify-between gap-3">
                   <h2 className="text-base md:text-lg font-semibold tracking-tight">Ride score</h2>
-                  <span className="text-xs text-white/60">Computed</span>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        try {
+                          if (typeof window === "undefined") return;
+                          const url = new URL(window.location.href);
+                          const params = url.searchParams;
+                          const first = stops[0]?.text?.trim();
+                          const last = stops[stops.length - 1]?.text?.trim();
+                          if (first && !params.get("start")) params.set("start", first);
+                          if (last && !params.get("end")) params.set("end", last);
+                          params.set("units", units);
+                          url.search = params.toString();
+                          const shareUrl = url.toString();
+                          if (navigator.share) {
+                            await navigator.share({ url: shareUrl, title: "CycleSeer ride score" });
+                            setShareStatus("shared");
+                          } else if (navigator.clipboard?.writeText) {
+                            await navigator.clipboard.writeText(shareUrl);
+                            setShareStatus("copied");
+                          }
+                        } catch {
+                          setShareStatus("error");
+                        } finally {
+                          window.setTimeout(() => setShareStatus(null), 2000);
+                        }
+                      }}
+                      className="hidden md:inline-flex items-center gap-1 rounded-full border border-white/15 bg-zinc-950/40 px-3 py-1 text-[11px] text-white/70 hover:bg-zinc-900 transition-colors"
+                    >
+                      <span>Share</span>
+                    </button>
+                    <span className="text-xs text-white/60">Computed</span>
+                  </div>
                 </div>
+                {shareStatus && (
+                  <div className="mt-2 text-[11px] text-white/60">
+                    {shareStatus === "copied" && "Link copied to clipboard."}
+                    {shareStatus === "shared" && "Shared from your device."}
+                    {shareStatus === "error" && "Could not share link. Please try again."}
+                  </div>
+                )}
+                {edgeNote && (
+                  <div className="mt-3 rounded-xl border border-white/10 bg-zinc-950/40 px-3 py-2 text-[11px] text-white/70">
+                    {edgeNote}
+                  </div>
+                )}
 
                 {/* Results Summary strip — mobile only: score + key stats + wind in one compact block */}
-                <div className="mt-3 md:hidden grid grid-cols-2 gap-2 rounded-xl border border-white/10 bg-zinc-950/30 p-3">
+                <div className="mt-3 md:hidden grid grid-cols-2 gap-2 border-t border-white/10 pt-3">
                   <div className="col-span-2 flex items-baseline justify-between gap-2">
-                    <span className={`text-3xl font-semibold tracking-tight ${scoreColor} ${displayedScore >= 8 ? "shadow-[0_0_20px_rgba(34,197,94,0.22)]" : ""}`}>
+                    <span className={`text-3xl font-semibold tracking-tight ${scoreColor}`}>
                       {animatedScore.toFixed(1)}
                     </span>
                     <span className="text-sm text-white/50">/10</span>
                   </div>
                   <div className="text-[11px] text-white/50">Distance</div>
-                  <div className="text-right text-sm font-medium text-white">{distanceMiles.toFixed(1)} mi</div>
+                  <div className="text-right text-sm font-medium text-white">
+                    {activeData ? formatDistance(activeData.route.distance_m, units) : "—"}
+                  </div>
+                  <div className="text-[11px] text-white/50">Duration</div>
+                  <div className="text-right text-sm font-medium text-white">{secondsToMin(activeData.route.duration_s)} min</div>
                   <div className="text-[11px] text-white/50">Gain</div>
                   <div className="text-right text-sm font-medium text-white">{Math.round(activeData.elevation.gain_m)} m</div>
-                  <div className="text-[11px] text-white/50">ETA</div>
-                  <div className="text-right text-sm font-medium text-white">{secondsToMin(activeData.route.duration_s)} min</div>
+                  <div className="text-[11px] text-white/50">Loss</div>
+                  <div className="text-right text-sm font-medium text-white">{Math.round(activeData.elevation.loss_m)} m</div>
                   {wind && (
                     <>
                       <div className="text-[11px] text-white/50">Wind</div>
@@ -1027,13 +1179,13 @@ function ResultsPageContent() {
                 {routeOptions.length > 1 && (
                   <>
                     <div className="mt-3 md:hidden">
-                      <div className="text-[11px] text-white/50 mb-1">Route comparison</div>
+                  <div className="text-[11px] text-white/50 mb-1 border-t border-white/10 pt-2">Route comparison</div>
                       <div className="space-y-1">
                         {routeOptions.map((opt, idx) => {
                           const isBest = idx === bestRouteIdx;
                           const ms = perRouteModeScores[idx];
                           const scoreVal = (ms?.total ?? opt.score.total).toFixed(1);
-                          const miles = metersToMiles(opt.route.distance_m).toFixed(1);
+                          const distLabel = formatDistance(opt.route.distance_m, units);
                           const elevFt = Math.round(opt.elevation.gain_m * 3.28084);
                           const mins = secondsToMin(opt.route.duration_s);
                           const isExpanded = expandedRouteIdx === idx;
@@ -1051,7 +1203,7 @@ function ResultsPageContent() {
                                 <span className="font-medium text-white">{opt.label}</span>
                                 {isBest && <span className="rounded bg-emerald-400/20 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-200">Best</span>}
                                 <span className="text-white/90">{scoreVal}</span>
-                                <span className="text-white/60">{miles} mi</span>
+                                <span className="text-white/60">{distLabel}</span>
                                 <span className="text-white/60">{elevFt} ft</span>
                                 <span className="text-white/60">{mins} min</span>
                                 <span className="text-white/50">{isExpanded ? "▲" : "▼"}</span>
@@ -1059,7 +1211,7 @@ function ResultsPageContent() {
                               {isExpanded && (
                                 <div className="px-3 pb-3 pt-0 text-[11px] text-white/70 border-t border-white/10">
                                   <div className="grid grid-cols-2 gap-1 mt-2">
-                                    <span>Distance</span><span>{miles} mi</span>
+                                    <span>Distance</span><span>{distLabel}</span>
                                     <span>Gain</span><span>{elevFt} ft</span>
                                     <span>Time</span><span>{mins} min</span>
                                     <span>Score</span><span>{scoreVal} /10</span>
@@ -1084,7 +1236,6 @@ function ResultsPageContent() {
                           const isBest = idx === bestRouteIdx;
                           const ms = perRouteModeScores[idx];
                           const scoreVal = ms?.total ?? opt.score.total;
-                          const miles = metersToMiles(opt.route.distance_m);
                           const mins = secondsToMin(opt.route.duration_s);
                           const elevFt = Math.round(opt.elevation.gain_m * 3.28084);
                           return (
@@ -1103,7 +1254,7 @@ function ResultsPageContent() {
                               </div>
                               <div className="mt-1 text-lg font-semibold text-white">{scoreVal.toFixed(1)}<span className="text-[10px] text-white/60"> /10</span></div>
                               <div className="mt-2 space-y-1 text-[11px] text-white/70">
-                                <div>Dist: {miles.toFixed(1)} mi</div>
+                                <div>Dist: {formatDistance(opt.route.distance_m, units)}</div>
                                 <div>Gain: {elevFt} ft</div>
                                 <div>Time: {mins} min</div>
                               </div>
@@ -1132,6 +1283,39 @@ function ResultsPageContent() {
                     </div>
                   </div>
                 )}
+
+                {/* How scoring works — compact list with light dividers */}
+                <div className="mt-5 border-t border-white/10 pt-3">
+                  <div className="text-xs font-semibold tracking-[0.18em] text-white/50 uppercase">
+                    How scoring works
+                  </div>
+                  <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3 text-[11px] text-white/75">
+                    <div className="space-y-1 border-b border-white/10 pb-2 sm:border-b-0 sm:pb-0">
+                      <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-white/55">
+                        Elevation difficulty
+                      </div>
+                      <p>Looks at how climbs are stacked, not just total gain.</p>
+                    </div>
+                    <div className="space-y-1 border-b border-white/10 pb-2 sm:border-b-0 sm:pb-0">
+                      <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-white/55">
+                        Route efficiency
+                      </div>
+                      <p>Estimates how steady your pacing can be across the route.</p>
+                    </div>
+                    <div className="space-y-1 border-b border-white/10 pb-2 sm:border-b-0 sm:pb-0">
+                      <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-white/55">
+                        Terrain profile
+                      </div>
+                      <p>Captures how rolling vs. flat your ride will feel.</p>
+                    </div>
+                    <div className="space-y-1">
+                      <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-white/55">
+                        Ride mode intelligence
+                      </div>
+                      <p>Aligns the score with your chosen training intent.</p>
+                    </div>
+                  </div>
+                </div>
 
                 {/* Overall ride feel — mobile: text-only insight (no repeated score); desktop: full */}
                 <div className="mt-4 md:mt-6 relative rounded-2xl border border-white/10 bg-gradient-to-br from-white/10 to-white/5 p-4 md:p-6 overflow-hidden">
@@ -1193,26 +1377,37 @@ function ResultsPageContent() {
                   </div>
                 </div>
 
-                {/* Speed feel / Climb effort / Comfort + Why — desktop only */}
-                <div className="mt-6 hidden md:block space-y-3">
-                  <ExplainRow label="Speed feel" value={to10(activeData.score.factors.efficiency)} hint={speedHint(activeData)} />
-                  <ExplainRow label="Climb effort" value={to10(activeData.score.factors.climbing)} hint={climbHint(activeData)} />
-                  <ExplainRow label="Comfort" value={to10(activeData.score.factors.safety_proxy)} hint={comfortHint(activeData)} />
-                </div>
-                <div className="mt-6 hidden md:block rounded-2xl border border-white/10 bg-zinc-950/30 p-4">
-                  <div className="text-xs text-white/60">Why this score</div>
-                  <ul className="mt-2 space-y-2 text-sm text-white/75">
-                    {whyBullets(activeData, wind).map((b, i) => (
-                      <li key={i} className="flex gap-2">
-                        <span className="mt-[6px] h-1.5 w-1.5 rounded-full bg-amber-300/90 shrink-0" />
-                        <span>{b}</span>
-                      </li>
-                    ))}
-                  </ul>
+                {/* Ride Analysis & Why This Score — desktop accordions to reduce clutter */}
+                <div className="hidden md:block mt-5">
+                  <AccordionSection title="Ride analysis">
+                    <div className="space-y-2.5">
+                      <ExplainRow label="Speed feel" value={to10(activeData.score.factors.efficiency)} hint={speedHint(activeData)} />
+                      <ExplainRow label="Climb effort" value={to10(activeData.score.factors.climbing)} hint={climbHint(activeData)} />
+                      <ExplainRow label="Comfort" value={to10(activeData.score.factors.safety_proxy)} hint={comfortHint(activeData)} />
+                    </div>
+                  </AccordionSection>
+                  <AccordionSection title="Why this score">
+                    <ul className="mt-1 space-y-2 text-sm text-white/75">
+                      {whyBullets(activeData, wind).map((b, i) => (
+                        <li key={i} className="flex gap-2">
+                          <span className="mt-[6px] h-1.5 w-1.5 rounded-full bg-amber-300/90 shrink-0" />
+                          <span>{b}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </AccordionSection>
                 </div>
 
                 <div className="mt-4 text-xs text-white/50">
                   Coming next: bike-friendliness (protected lanes, road type) to improve accuracy.
+                </div>
+                <div className="mt-4">
+                  <Link
+                    href="/"
+                    className="text-xs text-white/70 hover:text-white/90 underline-offset-4 hover:underline"
+                  >
+                    Score another route
+                  </Link>
                 </div>
               </div>
             </div>
@@ -1377,6 +1572,44 @@ function ScoreSkeleton() {
         <div className="h-10 w-full bg-white/5 rounded-xl" />
         <div className="h-10 w-full bg-white/5 rounded-xl" />
         <div className="h-10 w-full bg-white/5 rounded-xl" />
+      </div>
+    </div>
+  );
+}
+
+function AccordionSection({
+  title,
+  children,
+}: {
+  title: string;
+  children: ReactNode;
+}) {
+  const [open, setOpen] = useState(false);
+
+  return (
+    <div className="mt-4 border-t border-white/10 pt-3">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="flex w-full items-center justify-between text-xs text-white/70 hover:text-white/90 transition-colors"
+      >
+        <span className="font-medium">{title}</span>
+        <span
+          className={[
+            "inline-flex h-4 w-4 items-center justify-center text-[10px] text-white/60 transition-transform duration-200 ease-[cubic-bezier(0.4,0,0.2,1)]",
+            open ? "rotate-180" : "",
+          ].join(" ")}
+        >
+          ▾
+        </span>
+      </button>
+      <div
+        className={[
+          "overflow-hidden transition-all duration-200 ease-[cubic-bezier(0.4,0,0.2,1)]",
+          open ? "mt-2 max-h-[800px] opacity-100" : "max-h-0 opacity-0",
+        ].join(" ")}
+      >
+        <div className="text-xs text-white/75">{children}</div>
       </div>
     </div>
   );

@@ -28,12 +28,6 @@ export default function Navbar() {
             <Link className="hover:text-white transition" href="/about">
               About
             </Link>
-            <Link
-              className="px-4 py-2 rounded-full border border-white/15 hover:border-white/30 hover:bg-white/5 transition text-white"
-              href="/results"
-            >
-              Score My Ride
-            </Link>
           </nav>
 
           <div className="md:hidden flex items-center gap-3">
@@ -42,12 +36,6 @@ export default function Navbar() {
             </Link>
             <Link className="text-sm text-white/75 hover:text-white transition" href="/about">
               About
-            </Link>
-            <Link
-              className="px-4 py-2 rounded-full border border-white/15 hover:border-white/30 hover:bg-white/5 transition text-white text-sm"
-              href="/results"
-            >
-              Score My Ride
             </Link>
           </div>
         </div>

@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import RouteMap from "@/components/RouteMap";
 import ElevationChart from "@/components/ElevationChart";
@@ -170,7 +170,7 @@ function useAnimatedScore(target: number, durationMs = 600) {
   return display;
 }
 
-export default function ResultsPage() {
+function ResultsPageContent() {
   const searchParams = useSearchParams();
 
   const [loading, setLoading] = useState(false);
@@ -595,8 +595,9 @@ export default function ResultsPage() {
       setBestTime(null);
       return;
     }
+    const data = activeData;
     async function run() {
-      const coords = activeData.route.geometry.coordinates;
+      const coords = data.route.geometry.coordinates;
       if (!coords?.length) return;
       const a = coords[0];
       const b = coords[coords.length - 1];
@@ -1219,6 +1220,25 @@ export default function ResultsPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+function ResultsPageFallback() {
+  return (
+    <div className="mx-auto max-w-7xl px-5 py-10">
+      <div className="animate-pulse space-y-6">
+        <div className="h-8 w-48 bg-white/10 rounded" />
+        <div className="h-64 bg-white/5 rounded-2xl" />
+      </div>
+    </div>
+  );
+}
+
+export default function ResultsPage() {
+  return (
+    <Suspense fallback={<ResultsPageFallback />}>
+      <ResultsPageContent />
+    </Suspense>
   );
 }
 

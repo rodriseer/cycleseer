@@ -22,26 +22,34 @@ export default function Navbar() {
           </Link>
 
           <nav className="hidden md:flex items-center gap-8 text-sm text-white/75">
-            <Link className="hover:text-white transition" href="#features">
+            <Link className="hover:text-white transition" href="/features">
               Features
             </Link>
-            <Link className="hover:text-white transition" href="#how">
-              How it works
+            <Link className="hover:text-white transition" href="/about">
+              About
             </Link>
             <Link
               className="px-4 py-2 rounded-full border border-white/15 hover:border-white/30 hover:bg-white/5 transition text-white"
               href="/results"
             >
-              Open App
+              Score My Ride
             </Link>
           </nav>
 
-          <Link
-            className="md:hidden px-4 py-2 rounded-full border border-white/15 hover:border-white/30 hover:bg-white/5 transition text-white text-sm"
-            href="/results"
-          >
-            Open
-          </Link>
+          <div className="md:hidden flex items-center gap-3">
+            <Link className="text-sm text-white/75 hover:text-white transition" href="/features">
+              Features
+            </Link>
+            <Link className="text-sm text-white/75 hover:text-white transition" href="/about">
+              About
+            </Link>
+            <Link
+              className="px-4 py-2 rounded-full border border-white/15 hover:border-white/30 hover:bg-white/5 transition text-white text-sm"
+              href="/results"
+            >
+              Score My Ride
+            </Link>
+          </div>
         </div>
       </div>
     </header>

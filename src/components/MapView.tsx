@@ -102,35 +102,15 @@ export default function MapView({ center, line, pointA, pointB, onPick }: Props)
     }
   }, [pointA, pointB]);
 
-  // route line (reliable: add/update without waiting for "load" each time)
+  // route line: draw animation 800–1200ms linear (computational feel)
+  const DURATION_MS = 1000;
+
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
 
     const srcId = "route-src";
     const layerId = "route-layer";
-
-    const ensure = () => {
-      if (!line) return;
-
-      const data = { type: "Feature", geometry: line, properties: {} } as any;
-
-      if (map.getSource(srcId)) {
-        (map.getSource(srcId) as mapboxgl.GeoJSONSource).setData(data);
-        return;
-      }
-
-      map.addSource(srcId, { type: "geojson", data });
-      map.addLayer({
-        id: layerId,
-        type: "line",
-        source: srcId,
-        paint: {
-          "line-width": 5,
-          "line-opacity": 0.9,
-        },
-      });
-    };
 
     const remove = () => {
       if (map.getLayer(layerId)) map.removeLayer(layerId);
@@ -143,10 +123,57 @@ export default function MapView({ center, line, pointA, pointB, onPick }: Props)
       return;
     }
 
-    if (map.isStyleLoaded()) ensure();
-    else map.once("load", ensure);
+    const coords = line.coordinates;
+    const total = coords.length;
+    if (total < 2) return;
 
-    // no cleanup here; we keep layer unless line disappears
+    const ensureAndAnimate = () => {
+      const source = map.getSource(srcId) as mapboxgl.GeoJSONSource | undefined;
+      const hasSource = !!source;
+
+      if (!hasSource) {
+        const initial = {
+          type: "Feature" as const,
+          geometry: { type: "LineString" as const, coordinates: coords.slice(0, 2) },
+          properties: {},
+        };
+        map.addSource(srcId, { type: "geojson", data: initial });
+        map.addLayer({
+          id: layerId,
+          type: "line",
+          source: srcId,
+          paint: { "line-width": 5, "line-opacity": 0.9 },
+        });
+      }
+
+      const start = performance.now();
+      let cancelled = false;
+
+      const tick = (now: number) => {
+        if (cancelled) return;
+        const elapsed = now - start;
+        const progress = Math.min(1, elapsed / DURATION_MS);
+        const numPoints = Math.max(2, Math.ceil(progress * total));
+        const slice = coords.slice(0, numPoints);
+
+        const src = map.getSource(srcId) as mapboxgl.GeoJSONSource;
+        if (src) src.setData({ type: "Feature", geometry: { type: "LineString", coordinates: slice }, properties: {} });
+
+        if (progress < 1) requestAnimationFrame(tick);
+      };
+
+      requestAnimationFrame(tick);
+      return () => { cancelled = true; };
+    };
+
+    let cancel: (() => void) | void;
+    if (map.isStyleLoaded()) {
+      cancel = ensureAndAnimate();
+    } else {
+      map.once("load", () => { cancel = ensureAndAnimate(); });
+    }
+
+    return () => { cancel?.(); };
   }, [line]);
 
   return <div ref={ref} className="h-[520px] w-full rounded-2xl overflow-hidden border" />;

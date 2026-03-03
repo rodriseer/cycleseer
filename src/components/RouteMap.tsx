@@ -11,11 +11,14 @@ export default function RouteMap({
   bbox,
   hoverDistanceM,
   elevationPoints,
+  elevationGainM,
 }: {
   coords: LngLat[];
   bbox: BBox;
   hoverDistanceM?: number | null;
   elevationPoints?: { d_m: number; e_m: number }[];
+  /** When high (e.g. >200), subtle 1–2° tilt on hover as terrain cue */
+  elevationGainM?: number;
 }) {
   const mapRef = useRef<mapboxgl.Map | null>(null);
   const elRef = useRef<HTMLDivElement | null>(null);
@@ -43,13 +46,10 @@ export default function RouteMap({
     return coords[Math.max(0, Math.min(coords.length - 1, idx))];
   }, [hoverDistanceM, elevationPoints, coords]);
 
+  // Initialise map once
   useEffect(() => {
     if (!elRef.current) return;
-
-    if (!token) {
-      // Map won’t render without a public token
-      return;
-    }
+    if (!token) return;
 
     mapboxgl.accessToken = token;
 
@@ -65,12 +65,13 @@ export default function RouteMap({
     map.addControl(new mapboxgl.NavigationControl({ visualizePitch: true }), "top-right");
 
     map.on("load", () => {
+      // Empty initial route; coords effect will animate the line draw
       map.addSource("route", {
         type: "geojson",
         data: {
           type: "Feature",
           properties: {},
-          geometry: { type: "LineString", coordinates: coords },
+          geometry: { type: "LineString", coordinates: [] },
         },
       });
 
@@ -95,10 +96,6 @@ export default function RouteMap({
           "line-color": "#fbbf24",
         },
       });
-
-      // Fit bounds
-      const b = new mapboxgl.LngLatBounds([bbox[0], bbox[1]], [bbox[2], bbox[3]]);
-      map.fitBounds(b, { padding: 40, duration: 600 });
 
       // Marker source
       map.addSource("hover-point", {
@@ -137,7 +134,57 @@ export default function RouteMap({
       map.remove();
       mapRef.current = null;
     };
-  }, [coords, bbox, token]);
+  }, [token]);
+
+  // Route draw animation: 1000ms linear reveal when route changes
+  const ROUTE_DRAW_MS = 1000;
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    if (!coords?.length) return;
+
+    const run = () => {
+      const src = map.getSource("route") as mapboxgl.GeoJSONSource | undefined;
+      if (!src) return;
+
+      const total = coords.length;
+      if (total < 2) return;
+
+      const b = new mapboxgl.LngLatBounds([bbox[0], bbox[1]], [bbox[2], bbox[3]]);
+      map.fitBounds(b, { padding: 40, duration: 600 });
+
+      const start = performance.now();
+      let cancelled = false;
+
+      const tick = (now: number) => {
+        if (cancelled) return;
+        const elapsed = now - start;
+        const progress = Math.min(1, elapsed / ROUTE_DRAW_MS);
+        const numPoints = Math.max(2, Math.ceil(progress * total));
+        const slice = coords.slice(0, numPoints);
+
+        src.setData({
+          type: "Feature",
+          properties: {},
+          geometry: { type: "LineString", coordinates: slice },
+        });
+
+        if (progress < 1) requestAnimationFrame(tick);
+      };
+
+      requestAnimationFrame(tick);
+      return () => { cancelled = true; };
+    };
+
+    let cancel: (() => void) | undefined;
+    if (map.isStyleLoaded()) {
+      cancel = run();
+    } else {
+      map.once("load", () => { cancel = run(); });
+    }
+    return () => { cancel?.(); };
+  }, [coords, bbox]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -172,6 +219,8 @@ export default function RouteMap({
     );
   }
 
+  const hasTilt = typeof elevationGainM === "number" && elevationGainM > 200;
+
   return (
     <div className="rounded-2xl border border-white/10 bg-white/5 overflow-hidden">
       <div className="px-5 py-4 border-b border-white/10 flex items-center justify-between">
@@ -181,7 +230,12 @@ export default function RouteMap({
         </div>
         <div className="text-xs text-white/60">Outdoors style</div>
       </div>
-      <div ref={elRef} className="h-[360px] w-full" />
+      <div
+        className={`h-[360px] w-full ${hasTilt ? "transition-transform duration-[180ms] ease-[cubic-bezier(0.4,0,0.2,1)] hover:[transform:perspective(800px)_rotateX(1.5deg)]" : ""}`}
+        style={hasTilt ? { transformStyle: "preserve-3d" } : undefined}
+      >
+        <div ref={elRef} className="h-full w-full" />
+      </div>
     </div>
   );
 }

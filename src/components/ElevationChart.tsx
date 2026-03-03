@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { ElevPoint } from "@/lib/elevationScoring";
 
 export default function ElevationChart({
@@ -14,6 +14,9 @@ export default function ElevationChart({
 }) {
   const [hoverIdx, setHoverIdx] = useState<number | null>(null);
   const wrapRef = useRef<HTMLDivElement | null>(null);
+  const pathRef = useRef<SVGPathElement | null>(null);
+  const [pathLength, setPathLength] = useState<number>(0);
+  const [reveal, setReveal] = useState(false);
 
   const { w, h, path, minE, maxE, totalMi, maxD } = useMemo(() => {
     const w = 760;
@@ -99,6 +102,18 @@ export default function ElevationChart({
     return { x, y };
   }, [hover, maxD, w, h, minE, maxE, points]);
 
+  // Measure path length and trigger left-to-right reveal (no bounce)
+  useEffect(() => {
+    if (!path || !pathRef.current) return;
+    const len = pathRef.current.getTotalLength();
+    setPathLength(len);
+    setReveal(false);
+    const t = requestAnimationFrame(() => {
+      requestAnimationFrame(() => setReveal(true));
+    });
+    return () => cancelAnimationFrame(t);
+  }, [path]);
+
   return (
     <div className="rounded-2xl border border-white/10 bg-white/5 overflow-hidden">
       <div className="px-5 py-4 border-b border-white/10 flex items-center justify-between">
@@ -123,15 +138,21 @@ export default function ElevationChart({
           {/* area */}
           {path && <path d={`${path} L ${w} ${h - 24} L 0 ${h - 24} Z`} fill="rgba(251,191,36,0.12)" />}
 
-          {/* line */}
+          {/* line — stroke-dashoffset 100% → 0 on load */}
           {path && (
             <path
+              ref={pathRef}
               d={path}
               fill="none"
               stroke="rgba(251,191,36,0.85)"
               strokeWidth="3"
               strokeLinejoin="round"
               strokeLinecap="round"
+              strokeDasharray={pathLength}
+              strokeDashoffset={reveal ? 0 : pathLength}
+              style={{
+                transition: pathLength ? "stroke-dashoffset 900ms cubic-bezier(0.4, 0, 0.2, 1)" : undefined,
+              }}
             />
           )}
 

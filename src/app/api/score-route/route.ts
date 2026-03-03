@@ -1,6 +1,6 @@
 // src/app/api/score-route/route.ts
 import { NextResponse } from "next/server";
-import { scoreRoute } from "@/lib/routeScoring";
+import { scoreRoute, type RideMode } from "@/lib/routeScoring";
 import { routeCache } from "@/lib/cache";
 
 type PlaceBody = {
@@ -14,6 +14,7 @@ type Body = {
   startCenter?: [number, number] | null; // [lng, lat]
   endCenter?: [number, number] | null;
   places?: PlaceBody[];
+  mode?: RideMode;
 };
 
 export async function POST(req: Request) {
@@ -24,6 +25,7 @@ export async function POST(req: Request) {
     }
 
     const body = (await req.json()) as Body;
+    const mode: RideMode = body.mode ?? "scenic";
 
     // New multi-stop flow: body.places
     if (Array.isArray(body.places) && body.places.length >= 2) {
@@ -76,16 +78,66 @@ export async function POST(req: Request) {
       );
 
       const centers = resolved.map((r) => r.center);
-      const route = await cyclingDirectionsMulti(centers, token);
-      const elevation = await elevationFromTerrainRGB(
-        route.geometry.coordinates,
-        token
+
+      // Fetch up to 3 alternative routes (if Mapbox provides them).
+      const coords = centers.map(([lng, lat]) => `${lng},${lat}`).join(";");
+      const url =
+        `https://api.mapbox.com/directions/v5/mapbox/cycling/${coords}` +
+        `?geometries=geojson&overview=full&alternatives=true&access_token=${encodeURIComponent(
+          token
+        )}`;
+
+      const r = await fetch(url, { cache: "no-store" });
+      if (!r.ok) throw new Error(`Directions failed (${r.status})`);
+      const j = await r.json();
+
+      const rawRoutes = (j?.routes ?? []) as any[];
+      if (!rawRoutes.length) {
+        throw new Error("No route returned");
+      }
+
+      const basicRoutes = rawRoutes.slice(0, 3).map((rt) => {
+        if (!rt?.geometry?.coordinates?.length) {
+          throw new Error("No route geometry returned");
+        }
+        const bbox = computeBbox(rt.geometry.coordinates);
+        return {
+          distance_m: rt.distance as number,
+          duration_s: rt.duration as number,
+          bbox,
+          geometry: rt.geometry as {
+            type: "LineString";
+            coordinates: [number, number][];
+          },
+        };
+      });
+
+      const elevations = await Promise.all(
+        basicRoutes.map((route) =>
+          elevationFromTerrainRGB(route.geometry.coordinates, token)
+        )
       );
-      const score = scoreRoute(
-        route.distance_m,
-        route.duration_s,
-        elevation.gain_m
-      );
+
+      const labels = ["Route A", "Route B", "Route C"];
+
+      const routes = basicRoutes.map((route, i) => {
+        const elevation = elevations[i];
+        const score = scoreRoute(
+          route.distance_m,
+          route.duration_s,
+          elevation.gain_m,
+          mode
+        );
+        return {
+          id: String.fromCharCode(65 + i), // "A", "B", "C"
+          label: labels[i] ?? `Route ${String.fromCharCode(65 + i)}`,
+          route,
+          elevation,
+          score,
+        };
+      });
+
+      const primary = routes[0];
 
       return NextResponse.json({
         ok: true,
@@ -95,9 +147,11 @@ export async function POST(req: Request) {
             center: resolved[i].center,
           })),
         },
-        route,
-        elevation,
-        score,
+        // Keep top-level fields for backwards compatibility
+        route: primary.route,
+        elevation: primary.elevation,
+        score: primary.score,
+        routes,
       });
     }
 
@@ -137,7 +191,8 @@ export async function POST(req: Request) {
     const score = scoreRoute(
       route.distance_m,
       route.duration_s,
-      elevation.gain_m
+      elevation.gain_m,
+      mode
     );
 
     return NextResponse.json({

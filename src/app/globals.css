@@ -21,6 +21,16 @@ body {
   background-size: 18px 18px;
 }
 
+/* CycleSeer: intentional, mechanical, fast, performance-oriented (Garmin x Strava x Tesla) */
+
+:root {
+  --ease-mechanical: cubic-bezier(0.4, 0, 0.2, 1);
+  --duration-fast: 120ms;
+  --duration-score: 600ms;
+  --duration-route-draw: 1000ms;
+  --duration-fade: 180ms;
+}
+
 /* Fade-in animation for premium feel */
 @keyframes fadeIn {
   from {
@@ -31,4 +41,18 @@ body {
     opacity: 1;
     transform: translateY(0);
   }
+}
+
+/* Short fade for route/content transitions — no bounce */
+@keyframes fadeInShort {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.animate-fadeInShort {
+  animation: fadeInShort var(--duration-fade) var(--ease-mechanical) forwards;
 }

@@ -948,23 +948,7 @@ function ResultsPageContent() {
             </div>
           )}
 
-          {activeData && (
-            <div className="mt-4 grid grid-cols-2 gap-3 md:grid-cols-4 md:gap-4">
-              <MiniStat label="Distance" value={formatDistance(activeData.route.distance_m, units)} />
-              <MiniStat label="ETA" value={`${secondsToMin(activeData.route.duration_s)} min`} />
-              <MiniStat label="Gain" value={`${Math.round(activeData.elevation.gain_m)} m`} />
-              <MiniStat label="Grade proxy" value={`${grade.toFixed(1)}%`} />
-            </div>
-          )}
-
-          {activeData && (
-            <div className="mt-3 grid grid-cols-2 gap-3 md:grid-cols-4 md:gap-4">
-              <MiniStat label="Loss" value={`${Math.round(activeData.elevation.loss_m)} m`} />
-              <MiniStat label="Min elev" value={`${Math.round(activeData.elevation.min_m)} m`} />
-              <MiniStat label="Max elev" value={`${Math.round(activeData.elevation.max_m)} m`} />
-              <MiniStat label="Samples" value={`${activeData.elevation.samples}`} />
-            </div>
-          )}
+          {/* Core metrics now live in the Ride score section; keep inputs column focused. */}
 
           {/* Map — after key stats on mobile for correct flow: score → stats → map → breakdown */}
           {loading && !activeData && (
@@ -995,19 +979,14 @@ function ResultsPageContent() {
             </div>
           )}
 
-          {/* Route segments — last in the score result flow */}
+          {/* Route segments — advanced, under accordion */}
           {activeData && segments && (
-            <div className="mt-6 rounded-2xl border border-white/10 bg-zinc-950/30 p-5">
-              <div className="flex items-center justify-between">
-                <div className="text-sm font-medium text-white">Route segments</div>
-                <div className="text-xs text-white/60">Made to be easy to understand</div>
-              </div>
-
-              <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-3">
-                <div className="rounded-xl border border-white/10 bg-white/5 p-4">
-                  <div className="text-xs text-white/60">Steepest climb</div>
+            <AccordionSection title="Route segments">
+              <div className="mt-1 grid grid-cols-1 md:grid-cols-2 gap-3 text-[11px] text-white/80">
+                <div className="space-y-1">
+                  <div className="text-white/60 text-[10px] uppercase tracking-[0.14em]">Steepest climb</div>
                   {segments.steep ? (
-                    <div className="mt-1 text-sm text-white/80">
+                    <p>
                       <span className="font-medium text-white">
                         {(segments.steep.dist_m / 1609.344).toFixed(1)} mi
                       </span>{" "}
@@ -1015,16 +994,16 @@ function ResultsPageContent() {
                       <span className="text-white/60">
                         (mile {(segments.steep.from_m / 1609.344).toFixed(1)}–{(segments.steep.to_m / 1609.344).toFixed(1)})
                       </span>
-                    </div>
+                    </p>
                   ) : (
-                    <div className="mt-1 text-sm text-white/70">No meaningful steep section detected.</div>
+                    <p className="text-white/65">No meaningful steep section detected.</p>
                   )}
                 </div>
 
-                <div className="rounded-xl border border-white/10 bg-white/5 p-4">
-                  <div className="text-xs text-white/60">Longest climb</div>
+                <div className="space-y-1">
+                  <div className="text-white/60 text-[10px] uppercase tracking-[0.14em]">Longest climb</div>
                   {segments.bestLen ? (
-                    <div className="mt-1 text-sm text-white/80">
+                    <p>
                       <span className="font-medium text-white">
                         {(segments.bestLen.dist_m / 1609.344).toFixed(1)} mi
                       </span>{" "}
@@ -1032,21 +1011,21 @@ function ResultsPageContent() {
                       <span className="text-white/60">
                         (+{Math.round(segments.bestLen.gain_m)} m, mile {(segments.bestLen.from_m / 1609.344).toFixed(1)}–{(segments.bestLen.to_m / 1609.344).toFixed(1)})
                       </span>
-                    </div>
+                    </p>
                   ) : (
-                    <div className="mt-1 text-sm text-white/70">No sustained climb detected.</div>
+                    <p className="text-white/65">No sustained climb detected.</p>
                   )}
                 </div>
 
-                <div className="rounded-xl border border-white/10 bg-white/5 p-4 md:col-span-2">
-                  <div className="text-xs text-white/60">Rolling index</div>
-                  <div className="mt-1 text-sm text-white/80">
+                <div className="space-y-1 md:col-span-2">
+                  <div className="text-white/60 text-[10px] uppercase tracking-[0.14em]">Rolling index</div>
+                  <p>
                     This route feels <span className="font-medium text-white">{segments.roll}</span>{" "}
                     <span className="text-white/60">(how “up and down” it is)</span>
-                  </div>
+                  </p>
                 </div>
               </div>
-            </div>
+            </AccordionSection>
           )}
         </div>
 
@@ -1284,25 +1263,22 @@ function ResultsPageContent() {
                   </div>
                 )}
 
-                {/* How scoring works — compact list with light dividers */}
-                <div className="mt-5 border-t border-white/10 pt-3">
-                  <div className="text-xs font-semibold tracking-[0.18em] text-white/50 uppercase">
-                    How scoring works
-                  </div>
-                  <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3 text-[11px] text-white/75">
-                    <div className="space-y-1 border-b border-white/10 pb-2 sm:border-b-0 sm:pb-0">
+                {/* How scoring works — under a subtle accordion */}
+                <AccordionSection title="How scoring works">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3 text-[11px] text-white/75 pt-1">
+                    <div className="space-y-1">
                       <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-white/55">
                         Elevation difficulty
                       </div>
                       <p>Looks at how climbs are stacked, not just total gain.</p>
                     </div>
-                    <div className="space-y-1 border-b border-white/10 pb-2 sm:border-b-0 sm:pb-0">
+                    <div className="space-y-1">
                       <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-white/55">
                         Route efficiency
                       </div>
                       <p>Estimates how steady your pacing can be across the route.</p>
                     </div>
-                    <div className="space-y-1 border-b border-white/10 pb-2 sm:border-b-0 sm:pb-0">
+                    <div className="space-y-1">
                       <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-white/55">
                         Terrain profile
                       </div>
@@ -1315,7 +1291,7 @@ function ResultsPageContent() {
                       <p>Aligns the score with your chosen training intent.</p>
                     </div>
                   </div>
-                </div>
+                </AccordionSection>
 
                 {/* Overall ride feel — mobile: text-only insight (no repeated score); desktop: full */}
                 <div className="mt-4 md:mt-6 relative rounded-2xl border border-white/10 bg-gradient-to-br from-white/10 to-white/5 p-4 md:p-6 overflow-hidden">

@@ -17,19 +17,19 @@ export default function FeaturesPage() {
         </p>
 
         <div className="mt-12 space-y-10">
-          <section>
+          <section id="how-it-works">
             <h2 className="text-xl font-semibold text-white">Smart elevation analysis</h2>
             <p className="mt-2 text-white/70 leading-relaxed">
               We sample elevation along your route and surface steepest climb, longest climb, and a rolling index so you know how the ride will feel before you go.
             </p>
           </section>
-          <section>
+          <section id="ride-score">
             <h2 className="text-xl font-semibold text-white">Ride mode intelligence</h2>
             <p className="mt-2 text-white/70 leading-relaxed">
               Choose Scenic, Training, Commute, Flat & Fast, or Climbing Focus. The score adjusts to match your goal—efficiency, vertical gain, or comfort.
             </p>
           </section>
-          <section>
+          <section id="explore">
             <h2 className="text-xl font-semibold text-white">Route comparison</h2>
             <p className="mt-2 text-white/70 leading-relaxed">
               Get up to three route alternatives from start to destination. We score each one and highlight the best option for your selected ride mode. Click to preview each route on the map.

@@ -57,7 +57,7 @@ export default function HomePage() {
                 Score My Ride
               </Link>
               <Link
-                href="/features"
+                href="/how-it-works"
                 className="text-sm text-white/70 hover:text-white/90 underline-offset-4 hover:underline"
               >
                 How it works

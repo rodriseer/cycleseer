@@ -21,9 +21,9 @@ export default function CTA() {
               <Link href="/results">
                 <Button>Plan a ride</Button>
               </Link>
-              <a href="#features">
+              <Link href="/explore">
                 <Button variant="ghost">Explore</Button>
-              </a>
+              </Link>
             </div>
           </div>
         </GlassCard>

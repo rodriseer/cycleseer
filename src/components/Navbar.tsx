@@ -17,19 +17,19 @@ export default function Navbar() {
           <nav className="hidden md:flex items-center gap-8 text-sm text-white/75">
             <Link
               className="hover:text-white transition"
-              href="/features#how-it-works"
+              href="/how-it-works"
             >
               How it works
             </Link>
             <Link
               className="hover:text-white transition"
-              href="/features#explore"
+              href="/explore"
             >
               Explore
             </Link>
             <Link
               className="hover:text-white transition"
-              href="/features#ride-score"
+              href="/ride-score"
             >
               RideScore
             </Link>
